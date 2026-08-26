@@ -83,10 +83,50 @@ stop_shizuku() {
 }
 
 open_shizuku_app() {
+    local line pkg PKG=""
+    local lib_cache="/data/adb/.config/ashizw/lib_cache"
+
+    # UI feedback: inform user that we are starting
     show_message "Opening Shizuku app..." "📱"
-    log "📱 Opening Shizuku app..."
-    su -c "am start -n moe.shizuku.privileged.api/moe.shizuku.manager.MainActivity" >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
+
+    # --- Dynamic extraction from lib cache ---
+    if [ -r "$lib_cache" ]; then
+        # Read first non-empty line from the cache file
+        while IFS= read -r line && [ -z "$line" ]; do :; done < "$lib_cache"
+
+        if [ -n "$line" ]; then
+            # 1) Strip '/lib/' and everything after it from the end.
+            #    /data/app/~~abc/com.pkg-xyz/lib/arm64/...  →  /data/app/~~abc/com.pkg-xyz
+            line="${line%%/lib/*}"
+
+            # 2) Strip all leading path components up to the last '/'.
+            #    /data/app/~~abc/com.pkg-xyz  →  com.pkg-xyz
+            line="${line##*/}"
+
+            # 3) Strip the '-random' suffix from the end.
+            #    com.pkg-xyz  →  com.pkg
+            line="${line%%-*}"
+
+            # Validate: a real package name must contain at least one dot
+            case "$line" in
+                *.*) PKG="$line" ;;
+            esac
+        fi
+    fi
+
+    # --- Fallback: check known Shizuku forks ---
+    if [ -z "$PKG" ]; then
+        for pkg in moe.shizuku.privileged.api com.hamondev.shevery; do
+            # pm path exits 0 only if the package is installed
+            if pm path "$pkg" >/dev/null 2>&1; then
+                PKG="$pkg"
+                break
+            fi
+        done
+    fi
+
+    # --- Launch with suppressed output and result feedback ---
+    if [ -n "$PKG" ] && monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; then
         show_message "Shizuku app opened" "✅"
     else
         show_message "Failed to open Shizuku app" "⚠️"
